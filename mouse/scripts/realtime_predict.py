@@ -15,10 +15,26 @@ from mediapipe.tasks.python import vision
 NUM_HANDS = 1
 VIDEO_SOURCE = 0   # 0 = webcam, or use "test.mp4"
 SMOOTH_WINDOW = 10
-
+SHOW_WORLD_COORDS = True
+TARGET_LANDMARK_INDEX = 8 
 
 def get_project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def load_homography(project_root: str):
+    h_path = os.path.join(project_root, "camera", "H_matrix.npy")
+    if not os.path.exists(h_path):
+        print(f"[ERROR] Homography matrix not found: {h_path}")
+        return None
+    return np.load(h_path)
+
+
+def pixel_to_world(x, y, H):
+    p = np.array([x, y, 1.0], dtype=np.float32)
+    w = H @ p
+    w = w / w[2]
+    return float(w[0]), float(w[1])
 
 
 def create_detector(model_path: str, num_hands: int = 1):
@@ -98,6 +114,7 @@ def draw_landmarks_on_frame(frame_bgr, detection_result):
 
     return annotated
 
+
 def get_smoothed_label(history):
     if not history:
         return None
@@ -118,10 +135,16 @@ def main():
         print("Run train_classifier.py first.")
         return
 
+    H = None
+    if SHOW_WORLD_COORDS:
+        H = load_homography(project_root)
+        if H is None:
+            return
+
     detector = create_detector(detector_model_path, NUM_HANDS)
     clf = joblib.load(classifier_path)
 
-    cap = cv2.VideoCapture(VIDEO_SOURCE)
+    cap = cv2.VideoCapture(1)
     if not cap.isOpened():
         print(f"[ERROR] Cannot open video source: {VIDEO_SOURCE}")
         return
@@ -130,6 +153,30 @@ def main():
 
     prev_time = time.time()
     print("Press 'q' to quit.")
+
+    landmark_names = {
+        0: "wrist",
+        1: "thumb_cmc",
+        2: "thumb_mcp",
+        3: "thumb_ip",
+        4: "thumb_tip",
+        5: "index_mcp",
+        6: "index_pip",
+        7: "index_dip",
+        8: "index_tip",
+        9: "middle_mcp",
+        10: "middle_pip",
+        11: "middle_dip",
+        12: "middle_tip",
+        13: "ring_mcp",
+        14: "ring_pip",
+        15: "ring_dip",
+        16: "ring_tip",
+        17: "pinky_mcp",
+        18: "pinky_pip",
+        19: "pinky_dip",
+        20: "pinky_tip",
+    }
 
     while True:
         ret, frame = cap.read()
@@ -146,6 +193,60 @@ def main():
 
         detection_result = detector.detect(mp_image)
         annotated_frame = draw_landmarks_on_frame(frame, detection_result)
+
+        important_landmarks_text = []
+        landmark_world_coords = {}
+
+        if detection_result.hand_landmarks:
+            height, width, _ = frame.shape
+            hand_landmarks = detection_result.hand_landmarks[0]
+
+            for i, lm in enumerate(hand_landmarks):
+                api_x = lm.x
+                api_y = lm.y
+                api_z = lm.z
+
+                pixel_x = api_x * width
+                pixel_y = api_y * height
+
+                real_x, real_y = pixel_to_world(pixel_x, pixel_y, H)
+
+                landmark_world_coords[i] = {
+                    "name": landmark_names.get(i, f"lm_{i}"),
+                    "api_x": api_x,
+                    "api_y": api_y,
+                    "api_z": api_z,
+                    "pixel_x": pixel_x,
+                    "pixel_y": pixel_y,
+                    "real_x": real_x,
+                    "real_y": real_y,
+                }
+
+            for idx in range(21):
+                if idx not in landmark_world_coords:
+                    continue
+
+                info = landmark_world_coords[idx]
+                px = int(info["pixel_x"])
+                py = int(info["pixel_y"])
+                real_x = info["real_x"]
+                real_y = info["real_y"]
+                name = info["name"]
+
+                text = f"{idx:02d} {name}: ({real_x:.1f},{real_y:.1f})cm"
+                important_landmarks_text.append(text)
+
+                # 在每个点旁边显示实际坐标
+                cv2.putText(
+                    annotated_frame,
+                    f"{idx}:({real_x:.1f},{real_y:.1f})",
+                    (px + 6, py - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.35,
+                    (0, 255, 255),
+                    1
+                )
+
 
         features = extract_features_from_result(detection_result)
 
@@ -220,6 +321,19 @@ def main():
             (255, 255, 0),
             2
         )
+        
+
+        #base_y = 180
+        #for idx, text in enumerate(important_landmarks_text):
+        #    cv2.putText(
+        #        annotated_frame,
+        #        text,
+        #        (20, base_y + idx * 18),
+        #        cv2.FONT_HERSHEY_SIMPLEX,
+        #       0.4,
+        #       (255, 255, 255),
+        #         1
+        #    )
 
         cv2.imshow("Mouse Grip Video Prediction", annotated_frame)
 
