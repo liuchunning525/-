@@ -13,10 +13,17 @@ from mediapipe.tasks.python import vision
 
 # ========= Config =========
 NUM_HANDS = 1
-VIDEO_SOURCE = 0   # 0 = webcam, or use "test.mp4"
+VIDEO_SOURCE = 0
 SMOOTH_WINDOW = 10
+
 SHOW_WORLD_COORDS = True
-TARGET_LANDMARK_INDEX = 8 
+TARGET_LANDMARK_INDEX = 8
+
+PRINT_ALL_LANDMARKS = False
+
+# ===== Z相关 =====
+Z_SCALE = 20.0
+USE_WRIST_AS_Z_REF = True
 
 def get_project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
